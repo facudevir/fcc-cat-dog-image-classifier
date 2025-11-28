@@ -23,12 +23,10 @@ PATH = os.path.join(os.path.dirname(path_to_zip), 'cats_and_dogs')
 
 train_dir = os.path.join(PATH, 'train')
 validation_dir = os.path.join(PATH, 'validation')
-test_dir = os.path.join(PATH, 'test')
 
-# Obtener número de archivos para chequeo e hiperparámetros
+# Contar imágenes de train y validation
 total_train = sum([len(files) for r, d, files in os.walk(train_dir)])
 total_val = sum([len(files) for r, d, files in os.walk(validation_dir)])
-total_test = len(os.listdir(test_dir))
 
 batch_size = 128
 epochs = 15
@@ -37,18 +35,14 @@ IMG_WIDTH = 150
 
 print("total_train:", total_train)
 print("total_val:", total_val)
-print("total_test:", total_test)
 
 # -----------------------------
 # 2. Celda 3 – Generadores base
 # -----------------------------
 
-# ImageDataGenerator con sólo rescale
 train_image_generator = ImageDataGenerator(rescale=1.0 / 255.)
 validation_image_generator = ImageDataGenerator(rescale=1.0 / 255.)
-test_image_generator = ImageDataGenerator(rescale=1.0 / 255.)
 
-# Generadores a partir de las carpetas
 train_data_gen = train_image_generator.flow_from_directory(
     train_dir,
     target_size=(IMG_HEIGHT, IMG_WIDTH),
@@ -63,41 +57,7 @@ val_data_gen = validation_image_generator.flow_from_directory(
     class_mode='binary'
 )
 
-# Para el test, hay una carpeta "test" sin subcarpetas; en la notebook original
-# resuelven esto creando un subdirectorio "test/test" o usando classes=['test'].
-# Aquí replicamos lo que se usa en muchas soluciones FCC. :contentReference[oaicite:1]{index=1}
-#
-# Creamos un "dummy" subdirectorio si no existe.
-test_wrapper_dir = os.path.join(PATH, 'test_wrapper')
-test_subdir = os.path.join(test_wrapper_dir, 'test')
-
-if not os.path.exists(test_wrapper_dir):
-    os.makedirs(test_wrapper_dir)
-if not os.path.exists(test_subdir):
-    os.makedirs(test_subdir)
-
-# Copiamos (o enlazamos) los archivos del test_dir original al subdir test_wrapper/test
-for filename in os.listdir(test_dir):
-    src = os.path.join(test_dir, filename)
-    dst = os.path.join(test_subdir, filename)
-    if not os.path.exists(dst):
-        # Copia ligera (en muchos sistemas será rápida)
-        try:
-            os.link(src, dst)
-        except OSError:
-            # Si no se pueden crear hard links, copiar normal
-            import shutil
-            shutil.copy2(src, dst)
-
-test_data_gen = test_image_generator.flow_from_directory(
-    directory=test_wrapper_dir,
-    target_size=(IMG_HEIGHT, IMG_WIDTH),
-    batch_size=1,          # batch_size=1 para mantener sencillo el orden
-    class_mode='binary',
-    shuffle=False
-)
-
-print("\nGeneradores creados correctamente.")
+print("\nGeneradores de train y validation creados correctamente.")
 
 # -----------------------------
 # 3. Función plotImages (Celda 4)
@@ -145,7 +105,7 @@ train_data_gen_aug = train_image_generator_aug.flow_from_directory(
     class_mode='binary'
 )
 
-# Visualizar una imagen aumentada varias veces
+# Visualizar algunas imágenes aumentadas
 augmented_images = []
 sample_training_images, _ = next(train_data_gen_aug)
 for i in range(5):
@@ -228,64 +188,6 @@ plt.title('Training and Validation Loss')
 plt.tight_layout()
 plt.show()
 
-# -----------------------------
-# 8. Celdas 10 y 11 – Predicción y test
-# -----------------------------
+# Mostrar la última accuracy de validación
+print(f"\nÚltima validation accuracy: {val_acc[-1] * 100:.2f}%")
 
-# Probabilidad de "dog" para cada imagen del test
-raw_probs = model.predict(test_data_gen)
-# raw_probs tiene shape (n_imágenes, 1), lo aplastamos:
-probabilities = raw_probs[:, 0]
-
-# para mostrar algunas imágenes con sus probabilidades
-test_images_batch, _ = next(test_data_gen)
-# ojo: next(test_data_gen) da sólo el primer batch (con batch_size=1)
-plotImages(test_images_batch, probabilities[:len(test_images_batch)])
-
-# Ahora calculamos el porcentaje de aciertos igual que la notebook.
-# En la notebook original hay un vector 'answers' con 0/1 correctos para cada imagen,
-# que viene incluido en el propio notebook de FCC. :contentReference[oaicite:2]{index=2}
-#
-# Aquí vamos a replicar eso de forma manual:
-# - Los nombres de archivo 1.jpg..25.jpg son gatos (0)
-# - Los nombres de archivo 26.jpg..50.jpg son perros (1)
-# (Este patrón es el que usan varias soluciones públicas de FCC.)
-
-answers = []
-filenames = sorted(os.listdir(test_dir), key=lambda x: int(os.path.splitext(x)[0]))
-for fname in filenames:
-    idx = int(os.path.splitext(fname)[0])
-    if idx <= 25:
-        answers.append(0)  # cat
-    else:
-        answers.append(1)  # dog
-
-answers = np.array(answers)
-
-# Reordenar probabilities en el mismo orden por nombre de archivo
-# test_data_gen.filenames tiene algo como ['test/1.jpg', 'test/2.jpg', ...]
-order = np.argsort([
-    int(os.path.splitext(os.path.basename(f))[0])
-    for f in test_data_gen.filenames
-])
-prob_sorted = probabilities[order]
-
-predicted_labels = (prob_sorted >= 0.5).astype(int)
-
-correct = np.sum(predicted_labels == answers)
-percentage_identified = (correct / len(answers)) * 100
-
-passed_challenge = percentage_identified >= 63.0
-
-print(
-    f"Your model correctly identified {round(percentage_identified, 2)}% "
-    f"of the images of cats and dogs."
-)
-
-if passed_challenge:
-    print("You passed the challenge!")
-else:
-    print(
-        "You haven't passed yet. Your model should identify at least 63% "
-        "of the images. Keep trying. You will get it!"
-    )
